@@ -1,93 +1,76 @@
-# hadith_api.py — Récupération d'un hadith authentique via hadithapi.com
+# hadith_api.py — Récupération d'un hadith en FRANÇAIS via l'API fawazahmed0
+# Source : https://github.com/fawazahmed0/hadith-api (gratuit, sans clé)
+# On utilise UNIQUEMENT Bukhari et Muslim (recueils intégralement authentiques/sahih).
 import random
 import logging
 import requests
-
+ 
 logger = logging.getLogger(__name__)
-
-
+ 
+ 
 class HadithAPI:
-    def __init__(self, api_key, api_url, allowed_books, status="Sahih"):
-        self.api_key = api_key
-        self.api_url = api_url
-        self.allowed_books = allowed_books
-        self.status = status
+    def __init__(self, allowed_books=None, status="Sahih"):
+        # Éditions FRANÇAISES de Bukhari et Muslim
+        self.editions = ["fra-bukhari", "fra-muslim"]
+        # Nb approximatif de hadiths par recueil (pour tirer un numéro au hasard)
+        # Bukhari ~7563, Muslim ~7563 dans cette numérotation ; on reste prudent.
+        self.max_num = {"fra-bukhari": 7000, "fra-muslim": 7000}
+        self.base = "https://cdn.jsdelivr.net/gh/fawazahmed0/hadith-api@1/editions"
         self.session = requests.Session()
-
-    def get_random_hadith(self):
-        """
-        Récupère un hadith sahih au hasard depuis un recueil autorisé.
-        Filtre STRICT sur le grade (status=Sahih) — aucun hadith faible n'est diffusé.
-        Retourne un dict normalisé ou None.
-        """
-        book = random.choice(self.allowed_books)
-
-        params = {
-            "apiKey": self.api_key,
-            "book": book,
-            "status": self.status,   # garde-fou authenticité
-            "paginate": 25,          # on récupère un lot, on en tire un au hasard
-        }
-
-        # Page aléatoire pour varier les hadiths (les recueils ont des milliers d'entrées)
-        params["page"] = random.randint(1, 50)
-
-        try:
-            resp = self.session.get(self.api_url, params=params, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            logger.error(f"Erreur API hadith : {e}")
-            return None
-
-        # Structure attendue : data['hadiths']['data'] = liste
-        hadiths = None
-        try:
-            hadiths = data.get("hadiths", {}).get("data", [])
-        except Exception:
-            hadiths = []
-
-        if not hadiths:
-            logger.warning(f"Aucun hadith retourné (book={book}, page={params['page']}). Nouvel essai page 1.")
-            # Repli : page 1
-            params["page"] = 1
-            try:
-                resp = self.session.get(self.api_url, params=params, timeout=30)
-                resp.raise_for_status()
-                data = resp.json()
-                hadiths = data.get("hadiths", {}).get("data", [])
-            except Exception as e:
-                logger.error(f"Erreur API hadith (repli) : {e}")
-                return None
-
-        if not hadiths:
-            return None
-
-        # On ne garde que ceux avec un texte anglais ET un statut Sahih confirmé
-        valid = [
-            h for h in hadiths
-            if h.get("hadithEnglish") and str(h.get("status", "")).lower() == self.status.lower()
-        ]
-        if not valid:
-            valid = [h for h in hadiths if h.get("hadithEnglish")]
-        if not valid:
-            return None
-
-        h = random.choice(valid)
-
-        return self._normalize(h, book)
-
-    def _normalize(self, h, book):
-        """Normalise la réponse API en dict propre pour le formatage."""
-        book_names = {
-            "sahih-bukhari": "Sahih Al-Bukhari",
-            "sahih-muslim": "Sahih Muslim",
-        }
+ 
+    def _book_label(self, edition):
         return {
-            "text_en": (h.get("hadithEnglish") or "").strip(),
-            "text_ar": (h.get("hadithArabic") or "").strip(),
-            "narrator": (h.get("englishNarrator") or "").strip(),
-            "number": h.get("hadithNumber") or "",
-            "book": book_names.get(book, book),
-            "status": h.get("status", self.status),
-        }
+            "fra-bukhari": "Sahih Al-Bukhari",
+            "fra-muslim": "Sahih Muslim",
+        }.get(edition, edition)
+ 
+    def get_random_hadith(self, max_tries=6):
+        """
+        Tire un hadith FR au hasard dans Bukhari ou Muslim.
+        Réessaie si le numéro tiré n'existe pas (trous dans la numérotation).
+        """
+        for attempt in range(max_tries):
+            edition = random.choice(self.editions)
+            num = random.randint(1, self.max_num[edition])
+            url = f"{self.base}/{edition}/{num}.min.json"
+ 
+            try:
+                resp = self.session.get(url, timeout=30)
+                if resp.status_code != 200:
+                    # numéro inexistant → on retente
+                    continue
+                data = resp.json()
+            except Exception as e:
+                logger.warning(f"Essai {attempt+1} échoué ({url}) : {e}")
+                continue
+ 
+            # Structure attendue : {"hadiths":[{"hadithnumber":N,"text":"...","grades":[...]}], ...}
+            # On gère liste OU objet unique, par robustesse.
+            hadiths = data.get("hadiths", [])
+            if isinstance(hadiths, list):
+                if not hadiths:
+                    continue
+                h = hadiths[0]
+            elif isinstance(hadiths, dict):
+                h = hadiths
+            else:
+                logger.warning(f"Format inattendu pour 'hadiths' : {type(hadiths)}")
+                continue
+ 
+            text = (h.get("text") or "").strip()
+            if not text:
+                continue
+ 
+            number = h.get("hadithnumber", num)
+            grades = h.get("grades", [])
+ 
+            logger.info(f"Hadith FR récupéré : {edition} n°{number}")
+            return {
+                "text_fr": text,
+                "number": number,
+                "book": self._book_label(edition),
+                "grades": grades,
+            }
+ 
+        logger.error(f"Impossible de récupérer un hadith après {max_tries} essais.")
+        return None

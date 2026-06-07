@@ -1,4 +1,4 @@
-# telegram_bot.py — Envoi du message formaté sur Telegram
+# telegram_bot.py — Envoi du hadith (français) sur Telegram
 import logging
 import requests
  
@@ -12,28 +12,19 @@ class TelegramBot:
         self.api_url = f"https://api.telegram.org/bot{token}/sendMessage"
  
     def format_message(self, hadith):
-        text = hadith.get("text_en", "").strip()
-        narrator = hadith.get("narrator", "").strip()
+        text = hadith.get("text_fr", "").strip()
         number = hadith.get("number", "")
         book = hadith.get("book", "")
- 
-        if narrator.lower().startswith("narrated"):
-            narrator = narrator[len("narrated"):].strip(" :")
  
         lines = []
         lines.append("🕌 *Rappel du jour* 📖")
         lines.append("")
-        lines.append("*Hadith du jour*")
+        lines.append(text)
         lines.append("")
-        lines.append(f"_{text}_")
-        lines.append("")
-        lines.append(f"📚 *Source :* {book} — Hadith n°{number}")
-        if narrator:
-            lines.append(f"🔖 *Rapporté par :* {narrator}")
+        lines.append(f"📚 *Source :* {book} — n°{number}")
         lines.append("")
         lines.append("━━━━━━━━━━━━━━━")
         lines.append("🤲 _Qu'Allah nous guide sur le droit chemin_")
- 
         return "\n".join(lines)
  
     def send_hadith(self, hadith):
@@ -46,11 +37,9 @@ class TelegramBot:
         }
         try:
             resp = requests.post(self.api_url, json=payload, timeout=30)
-            # On affiche TOUJOURS la réponse détaillée de Telegram
             if resp.status_code != 200:
                 logger.error(f"Telegram a refusé (HTTP {resp.status_code}). "
-                             f"chat_id utilisé : '{self.chat_id}'. "
-                             f"Réponse détaillée : {resp.text}")
+                             f"chat_id : '{self.chat_id}'. Réponse : {resp.text}")
                 return False
             logger.info("✅ Hadith envoyé sur Telegram")
             return True
